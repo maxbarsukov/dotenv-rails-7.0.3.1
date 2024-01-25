@@ -10,9 +10,7 @@ describe Dotenv do
       let(:env_files) { [] }
 
       it "defaults to .env" do
-        expect(Dotenv::Environment).to receive(:new).with(expand(".env"),
-                                                          anything)
-          .and_return(double(apply: {}, apply!: {}))
+        expect(Dotenv::Environment).to receive(:new).with(expand(".env"), anything).and_call_original
         subject
       end
     end
@@ -24,7 +22,7 @@ describe Dotenv do
         expected = expand("~/.env")
         allow(File).to receive(:exist?) { |arg| arg == expected }
         expect(Dotenv::Environment).to receive(:new).with(expected, anything)
-          .and_return(double(apply: {}, apply!: {}))
+          .and_return(Dotenv::Environment.new(".env"))
         subject
       end
     end
@@ -33,13 +31,13 @@ describe Dotenv do
       let(:env_files) { [".env", fixture_path("plain.env")] }
 
       let(:expected) do
-        { "OPTION_A" => "1",
-          "OPTION_B" => "2",
-          "OPTION_C" => "3",
-          "OPTION_D" => "4",
-          "OPTION_E" => "5",
-          "PLAIN" => "true",
-          "DOTENV" => "true" }
+        {"OPTION_A" => "1",
+         "OPTION_B" => "2",
+         "OPTION_C" => "3",
+         "OPTION_D" => "4",
+         "OPTION_E" => "5",
+         "PLAIN" => "true",
+         "DOTENV" => "true"}
       end
 
       it "loads all files" do
@@ -49,8 +47,39 @@ describe Dotenv do
         end
       end
 
-      it "returns hash of loaded environments" do
+      it "returns hash of loaded variables" do
         expect(subject).to eq(expected)
+      end
+
+      it "does not return unchanged variables" do
+        ENV["OPTION_A"] = "1"
+        expect(subject).not_to have_key("OPTION_A")
+      end
+    end
+  end
+
+  shared_examples "overwrite" do
+    it_behaves_like "load"
+
+    context "with multiple files" do
+      let(:env_files) { [fixture_path("important.env"), fixture_path("plain.env")] }
+
+      let(:expected) do
+        {
+          "OPTION_A" => "abc",
+          "OPTION_B" => "2",
+          "OPTION_C" => "3",
+          "OPTION_D" => "4",
+          "OPTION_E" => "5",
+          "PLAIN" => "false"
+        }
+      end
+
+      it "respects the file importance order" do
+        subject
+        expected.each do |key, value|
+          expect(ENV[key]).to eq(value)
+        end
       end
     end
   end
@@ -61,9 +90,9 @@ describe Dotenv do
 
     it_behaves_like "load"
 
-    it "initializes the Environment with a truthy is_load" do
-      expect(Dotenv::Environment).to receive(:new).with(anything, true)
-        .and_return(double(apply: {}, apply!: {}))
+    it "initializes the Environment with overwrite: false" do
+      expect(Dotenv::Environment).to receive(:new).with(anything, overwrite: false)
+        .and_call_original
       subject
     end
 
@@ -72,7 +101,10 @@ describe Dotenv do
 
       it "fails silently" do
         expect { subject }.not_to raise_error
-        expect(ENV.keys).to eq(@env_keys)
+      end
+
+      it "does not change ENV" do
+        expect { subject }.not_to change { ENV.inspect }
       end
     end
   end
@@ -83,9 +115,9 @@ describe Dotenv do
 
     it_behaves_like "load"
 
-    it "initializes Environment with truthy is_load" do
-      expect(Dotenv::Environment).to receive(:new).with(anything, true)
-        .and_return(double(apply: {}, apply!: {}))
+    it "initializes Environment with overwrite: false" do
+      expect(Dotenv::Environment).to receive(:new).with(anything, overwrite: false)
+        .and_call_original
       subject
     end
 
@@ -98,21 +130,22 @@ describe Dotenv do
     end
   end
 
-  describe "overload" do
+  describe "overwrite" do
     let(:env_files) { [fixture_path("plain.env")] }
-    subject { Dotenv.overload(*env_files) }
+    subject { Dotenv.overwrite(*env_files) }
     it_behaves_like "load"
+    it_behaves_like "overwrite"
 
-    it "initializes the Environment with a falsey is_load" do
-      expect(Dotenv::Environment).to receive(:new).with(anything, false)
-        .and_return(double(apply: {}, apply!: {}))
+    it "initializes the Environment overwrite: true" do
+      expect(Dotenv::Environment).to receive(:new).with(anything, overwrite: true)
+        .and_call_original
       subject
     end
 
     context "when loading a file containing already set variables" do
       let(:env_files) { [fixture_path("plain.env")] }
 
-      it "overrides any existing ENV variables" do
+      it "overwrites any existing ENV variables" do
         ENV["OPTION_A"] = "predefined"
 
         subject
@@ -126,26 +159,30 @@ describe Dotenv do
 
       it "fails silently" do
         expect { subject }.not_to raise_error
-        expect(ENV.keys).to eq(@env_keys)
+      end
+
+      it "does not change ENV" do
+        expect { subject }.not_to change { ENV.inspect }
       end
     end
   end
 
-  describe "overload!" do
+  describe "overwrite!" do
     let(:env_files) { [fixture_path("plain.env")] }
-    subject { Dotenv.overload!(*env_files) }
+    subject { Dotenv.overwrite!(*env_files) }
     it_behaves_like "load"
+    it_behaves_like "overwrite"
 
-    it "initializes the Environment with a falsey is_load" do
-      expect(Dotenv::Environment).to receive(:new).with(anything, false)
-        .and_return(double(apply: {}, apply!: {}))
+    it "initializes the Environment with overwrite: true" do
+      expect(Dotenv::Environment).to receive(:new).with(anything, overwrite: true)
+        .and_call_original
       subject
     end
 
     context "when loading a file containing already set variables" do
       let(:env_files) { [fixture_path("plain.env")] }
 
-      it "overrides any existing ENV variables" do
+      it "overwrites any existing ENV variables" do
         ENV["OPTION_A"] = "predefined"
         subject
         expect(ENV["OPTION_A"]).to eq("1")
@@ -169,7 +206,7 @@ describe Dotenv do
     describe "load" do
       it "instruments if the file exists" do
         expect(instrumenter).to receive(:instrument) do |name, payload|
-          expect(name).to eq("dotenv.load")
+          expect(name).to eq("load.dotenv")
           expect(payload[:env]).to be_instance_of(Dotenv::Environment)
           {}
         end
@@ -189,11 +226,10 @@ describe Dotenv do
     before { Dotenv.load(*env_files) }
 
     it "raises exception with not defined mandatory ENV keys" do
-      expect { Dotenv.require_keys("BOM", "TEST") }.to \
-        raise_error(
-          Dotenv::MissingKeys,
-          'Missing required configuration key: ["TEST"]'
-        )
+      expect { Dotenv.require_keys("BOM", "TEST") }.to raise_error(
+        Dotenv::MissingKeys,
+        'Missing required configuration key: ["TEST"]'
+      )
     end
   end
 
@@ -206,7 +242,7 @@ describe Dotenv do
 
       it "defaults to .env" do
         expect(Dotenv::Environment).to receive(:new).with(expand(".env"),
-                                                          anything)
+          anything)
         subject
       end
     end
@@ -226,13 +262,13 @@ describe Dotenv do
       let(:env_files) { [".env", fixture_path("plain.env")] }
 
       let(:expected) do
-        { "OPTION_A" => "1",
-          "OPTION_B" => "2",
-          "OPTION_C" => "3",
-          "OPTION_D" => "4",
-          "OPTION_E" => "5",
-          "PLAIN" => "true",
-          "DOTENV" => "true" }
+        {"OPTION_A" => "1",
+         "OPTION_B" => "2",
+         "OPTION_C" => "3",
+         "OPTION_D" => "4",
+         "OPTION_E" => "5",
+         "PLAIN" => "true",
+         "DOTENV" => "true"}
       end
 
       it "does not modify ENV" do
@@ -247,8 +283,8 @@ describe Dotenv do
       end
     end
 
-    it "initializes the Environment with a falsey is_load" do
-      expect(Dotenv::Environment).to receive(:new).with(anything, false)
+    it "initializes the Environment with overwrite: false" do
+      expect(Dotenv::Environment).to receive(:new).with(anything, overwrite: false)
       subject
     end
 
@@ -270,8 +306,64 @@ describe Dotenv do
     end
 
     it "fixture file has UTF-8 BOM" do
-      contents = File.open(subject, "rb", &:read).force_encoding("UTF-8")
+      contents = File.binread(subject).force_encoding("UTF-8")
       expect(contents).to start_with("\xEF\xBB\xBF".force_encoding("UTF-8"))
+    end
+  end
+
+  describe "restore" do
+    it "restores previously saved snapshot" do
+      ENV["MODIFIED"] = "true"
+      Dotenv.restore # save was already called in setup
+      expect(ENV["MODIFIED"]).to be_nil
+    end
+
+    it "raises an error in threads" do
+      ENV["MODIFIED"] = "true"
+      Thread.new do
+        expect { Dotenv.restore }.to raise_error(ThreadError, /not thread safe/)
+      end.join
+      expect(ENV["MODIFIED"]).to eq("true")
+    end
+  end
+
+  describe "modify" do
+    it "sets values for the block" do
+      ENV["FOO"] = "initial"
+
+      Dotenv.modify(FOO: "during", BAR: "baz") do
+        expect(ENV["FOO"]).to eq("during")
+        expect(ENV["BAR"]).to eq("baz")
+      end
+
+      expect(ENV["FOO"]).to eq("initial")
+      expect(ENV).not_to have_key("BAR")
+    end
+  end
+
+  describe "update" do
+    it "sets new variables" do
+      Dotenv.update({"OPTION_A" => "1"})
+      expect(ENV["OPTION_A"]).to eq("1")
+    end
+
+    it "does not overwrite defined variables" do
+      ENV["OPTION_A"] = "original"
+      Dotenv.update({"OPTION_A" => "updated"})
+      expect(ENV["OPTION_A"]).to eq("original")
+    end
+
+    context "with overwrite: true" do
+      it "sets new variables" do
+        Dotenv.update({"OPTION_A" => "1"}, overwrite: true)
+        expect(ENV["OPTION_A"]).to eq("1")
+      end
+
+      it "overwrites defined variables" do
+        ENV["OPTION_A"] = "original"
+        Dotenv.update({"OPTION_A" => "updated"}, overwrite: true)
+        expect(ENV["OPTION_A"]).to eq("updated")
+      end
     end
   end
 

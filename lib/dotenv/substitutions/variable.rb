@@ -18,12 +18,8 @@ module Dotenv
           \}?           # closing brace
         /xi
 
-        def call(value, env, is_load)
-          combined_env = if is_load
-                           env.merge(ENV)
-                         else
-                           ENV.to_h.merge(env)
-                         end
+        def call(value, env, overwrite: false)
+          combined_env = overwrite ? ENV.to_h.merge(env) : env.merge(ENV)
           value.gsub(VARIABLE) do |variable|
             match = $LAST_MATCH_INFO
             substitute(match, variable, combined_env)
@@ -33,8 +29,8 @@ module Dotenv
         private
 
         def substitute(match, variable, env)
-          if match[1] == '\\'
-            variable[1..-1]
+          if match[1] == "\\"
+            variable[1..]
           elsif match[3]
             env.fetch(match[3], "")
           else

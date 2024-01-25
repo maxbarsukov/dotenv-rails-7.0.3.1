@@ -2,7 +2,7 @@ require "spec_helper"
 
 describe Dotenv::Parser do
   def env(string)
-    Dotenv::Parser.call(string, true)
+    Dotenv::Parser.call(string)
   end
 
   it "parses unquoted values" do
@@ -74,7 +74,7 @@ describe Dotenv::Parser do
       .to eql("test")
   end
 
-  it "doesn't expand variables from ENV if in local env in overload" do
+  it "doesn't expand variables from ENV if in local env in overwrite" do
     ENV["FOO"] = "test"
     expect(env("FOO=development\nBAR=${FOO}")["BAR"])
       .to eql("test")
@@ -113,17 +113,32 @@ describe Dotenv::Parser do
 export OPTION_A')).to eql("OPTION_A" => "2")
   end
 
-  it "allows export line if you want to do it that way and checks for unset"\
-     " variables" do
+  it "allows export line if you want to do it that way and checks for unset variables" do
     expect do
       env('OPTION_A=2
 export OH_NO_NOT_SET')
-    end.to raise_error(Dotenv::FormatError, 'Line "export OH_NO_NOT_SET"'\
-                                            " has an unset variable")
+    end.to raise_error(Dotenv::FormatError, 'Line "export OH_NO_NOT_SET" has an unset variable')
   end
 
-  it "expands newlines in quoted strings" do
-    expect(env('FOO="bar\nbaz"')).to eql("FOO" => "bar\nbaz")
+  it 'escapes \n in quoted strings' do
+    expect(env('FOO="bar\nbaz"')).to eql("FOO" => "bar\\nbaz")
+    expect(env('FOO="bar\\nbaz"')).to eql("FOO" => "bar\\nbaz")
+  end
+
+  it 'expands \n and \r in quoted strings with DOTENV_LINEBREAK_MODE=legacy in current file' do
+    ENV["DOTENV_LINEBREAK_MODE"] = "strict"
+
+    contents = [
+      "DOTENV_LINEBREAK_MODE=legacy",
+      'FOO="bar\nbaz\rfizz"'
+    ].join("\n")
+    expect(env(contents)).to eql("DOTENV_LINEBREAK_MODE" => "legacy", "FOO" => "bar\nbaz\rfizz")
+  end
+
+  it 'expands \n and \r in quoted strings with DOTENV_LINEBREAK_MODE=legacy in ENV' do
+    ENV["DOTENV_LINEBREAK_MODE"] = "legacy"
+    contents = 'FOO="bar\nbaz\rfizz"'
+    expect(env(contents)).to eql("FOO" => "bar\nbaz\rfizz")
   end
 
   it 'parses variables with "." in the name' do
@@ -261,8 +276,8 @@ one more line")
       expect(env("FOO=bar\r\nbaz=fbb")).to eql("FOO" => "bar", "baz" => "fbb")
     end
 
-    it "expands carriage return in quoted strings" do
-      expect(env('FOO="bar\rbaz"')).to eql("FOO" => "bar\rbaz")
+    it "escapes carriage return in quoted strings" do
+      expect(env('FOO="bar\rbaz"')).to eql("FOO" => "bar\\rbaz")
     end
 
     it "escape $ properly when no alphabets/numbers/_  are followed by it" do
@@ -276,7 +291,7 @@ one more line")
 
     # This functionality is not supported on JRuby or Rubinius
     if (!defined?(RUBY_ENGINE) || RUBY_ENGINE != "jruby") &&
-       !defined?(Rubinius)
+        !defined?(Rubinius)
       it "substitutes shell variables within interpolated shell commands" do
         expect(env(%(VAR1=var1\ninterp=$(echo "VAR1 is $VAR1")))["interp"])
           .to eql("VAR1 is var1")

@@ -2,11 +2,11 @@ require "dotenv/substitutions/variable"
 require "dotenv/substitutions/command" if RUBY_VERSION > "1.8.7"
 
 module Dotenv
+  # Error raised when encountering a syntax error while parsing a .env file.
   class FormatError < SyntaxError; end
 
-  # This class enables parsing of a string for key value pairs to be returned
-  # and stored in the Environment. It allows for variable substitutions and
-  # exporting of variables.
+  # Parses the `.env` file format into key/value pairs.
+  # It allows for variable substitutions, command substitutions, and exporting of variables.
   class Parser
     @substitutions =
       [Dotenv::Substitutions::Variable, Dotenv::Substitutions::Command]
@@ -15,7 +15,7 @@ module Dotenv
       (?:^|\A)              # beginning of line
       \s*                   # leading whitespace
       (?:export\s+)?        # optional export
-      ([\w\.]+)             # key
+      ([\w.]+)              # key
       (?:\s*=\s*?|:\s+?)    # separator
       (                     # optional value begin
         \s*'(?:\\'|[^'])*'  #   single quoted value
@@ -32,15 +32,15 @@ module Dotenv
     class << self
       attr_reader :substitutions
 
-      def call(string, is_load = false)
-        new(string, is_load).call
+      def call(...)
+        new(...).call
       end
     end
 
-    def initialize(string, is_load = false)
+    def initialize(string, overwrite: false)
       @string = string
       @hash = {}
-      @is_load = is_load
+      @overwrite = overwrite
     end
 
     def call
@@ -72,8 +72,7 @@ module Dotenv
       value = value.strip.sub(/\A(['"])(.*)\1\z/m, '\2')
       maybe_quote = Regexp.last_match(1)
       value = unescape_value(value, maybe_quote)
-      value = perform_substitutions(value, maybe_quote)
-      value
+      perform_substitutions(value, maybe_quote)
     end
 
     def unescape_characters(value)
@@ -81,11 +80,15 @@ module Dotenv
     end
 
     def expand_newlines(value)
-      value.gsub('\n', "\n").gsub('\r', "\r")
+      if (@hash["DOTENV_LINEBREAK_MODE"] || ENV["DOTENV_LINEBREAK_MODE"]) == "legacy"
+        value.gsub('\n', "\n").gsub('\r', "\r")
+      else
+        value.gsub('\n', "\\\\\\n").gsub('\r', "\\\\\\r")
+      end
     end
 
     def variable_not_set?(line)
-      !line.split[1..-1].all? { |var| @hash.member?(var) }
+      !line.split[1..].all? { |var| @hash.member?(var) }
     end
 
     def unescape_value(value, maybe_quote)
@@ -101,7 +104,7 @@ module Dotenv
     def perform_substitutions(value, maybe_quote)
       if maybe_quote != "'"
         self.class.substitutions.each do |proc|
-          value = proc.call(value, @hash, @is_load)
+          value = proc.call(value, @hash, overwrite: @overwrite)
         end
       end
       value
